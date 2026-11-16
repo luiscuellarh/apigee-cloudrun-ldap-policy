@@ -1,0 +1,18 @@
+{
+  "providers": [
+    {
+      "id": "ldap-policy-service",
+      "profile": "MSAD",
+      "urls": [
+        "mock://enterprise-directory.internal:636"
+      ],
+      "base_dn": "dc=enterprise,dc=com",
+      "write_base_dn": "ou=Subscribers,dc=enterprise,dc=com",
+      "default_require_group": "CN=API-Consumers,OU=Groups,DC=enterprise,DC=com",
+      "conn_timeout": "2s",
+      "read_timeout": "4s",
+      "blacklist_duration": "30s",
+      "pool_max_idle": 20
+    }
+  ]
+}

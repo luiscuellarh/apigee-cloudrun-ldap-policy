@@ -1,0 +1,480 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/apigee/apigee-templater/main/schema/gateway.schema.1.0.json
+name: __POLICY_PROXY_NAME__
+displayName: __POLICY_PROXY_NAME__
+type: proxy
+gateway: apigee
+schemaVersion: 1.0.0
+description: Business API Proxy emulating the LDAP Policy in PreFlow via ServiceCallout using mandatory x-ldap-provider header (Zero KVM at runtime).
+
+endpoints:
+  - name: default
+    basePath: __POLICY_BASE_PATH__
+    routes:
+      - name: default
+        target: default
+    flows:
+      # Flow 1: Authenticate User + Check Group + Enrich Upstream Headers
+      # Routes strictly by mandatory request.header.x-ldap-provider
+      - name: Authenticate-And-Enrich
+        mode: Request
+        condition: (proxy.pathsuffix MatchesPath "/orders")
+        steps:
+          - name: BA-Decode-BasicAuth
+          - name: SC-LDAP-Policy-Authenticate
+          - name: EV-LDAP-Context-Variables
+          - name: RF-LDAP-Policy-Failed
+            condition: (ldap.callout.response.status.code != 200) or (ldap.authorized = false)
+          - name: AM-Inject-LDAP-Headers
+
+      # Flow 2: Query LDAP Policy Operation (RFC 4515 filter escaping + multivalue)
+      - name: Query-LDAP-Policy
+        mode: Request
+        condition: (proxy.pathsuffix MatchesPath "/query")
+        steps:
+          - name: SC-LDAP-Policy-Query
+          - name: EV-LDAP-Context-Variables
+          - name: RF-LDAP-Policy-Failed
+            condition: (ldap.callout.response.status.code != 200) or (ldap.success = false)
+
+      # Flow 3: Write LDAP Policy Operation (LDIF + Write Base DN security boundary)
+      - name: Write-LDAP-Policy
+        mode: Request
+        condition: (proxy.pathsuffix MatchesPath "/write") and (request.verb = "POST")
+        steps:
+          - name: SC-LDAP-Policy-Write
+          - name: EV-LDAP-Context-Variables
+          - name: RF-LDAP-Policy-Failed
+            condition: (ldap.callout.response.status.code != 200) or (ldap.success = false)
+
+      # Response PostFlow: Returns populated Apigee LDAP context variables & injected headers
+      - name: PostFlow
+        mode: Response
+        steps:
+          - name: AM-Build-Response
+
+targets:
+  - name: default
+    url: __CLOUD_RUN_URL__/healthz
+    httpTargetConnection:
+      Properties:
+        Property:
+          - metadata:
+              name: success.codes
+            _text: 1xx,2xx,3xx,4xx
+      Authentication:
+        GoogleIDToken:
+          Audience: __CUSTOM_AUDIENCE__
+      URL: __CLOUD_RUN_URL__/healthz
+    flows: []
+
+policies:
+  # 1. Decode Basic Auth Header into ldap.username and ldap.password
+  - name: BA-Decode-BasicAuth
+    type: BasicAuthentication
+    content:
+      BasicAuthentication:
+        _attributes:
+          async: "false"
+          continueOnError: "false"
+          enabled: "true"
+          name: BA-Decode-BasicAuth
+        DisplayName:
+          _text: BA-Decode-BasicAuth
+        Operation:
+          _text: Decode
+        IgnoreUnresolvedVariables:
+          _text: "false"
+        User:
+          _attributes:
+            ref: ldap.username
+        Password:
+          _attributes:
+            ref: ldap.password
+        Source:
+          _text: request.header.Authorization
+
+  # 2A. ServiceCallout: Emulates LDAP Policy (Authenticate + Group Check + Attribute Lookup)
+  - name: SC-LDAP-Policy-Authenticate
+    type: ServiceCallout
+    content:
+      ServiceCallout:
+        _attributes:
+          async: "false"
+          continueOnError: "true"
+          enabled: "true"
+          name: SC-LDAP-Policy-Authenticate
+        DisplayName:
+          _text: SC-LDAP-Policy-Authenticate
+        Request:
+          _attributes:
+            clearPayload: "true"
+            variable: ldap.callout.request
+          IgnoreUnresolvedVariables:
+            _text: "true"
+          Set:
+            Headers:
+              Header:
+                _attributes:
+                  name: Content-Type
+                _text: application/json
+            Payload:
+              _attributes:
+                contentType: application/json
+              _text: |
+                {
+                  "provider_id": "{request.header.x-ldap-provider}",
+                  "username": "{ldap.username}",
+                  "password": "{ldap.password}",
+                  "require_groups": ["{request.header.x-ldap-group}"],
+                  "resolve_nested_ad": true,
+                  "return_attributes": ["mail", "cn", "displayName", "department", "telephoneNumber", "memberOf"],
+                  "multivalue_mode": "JOIN_COMMA"
+                }
+            Verb:
+              _text: POST
+        Response:
+          _text: ldap.callout.response
+        Timeout:
+          _text: "8000"
+        HTTPTargetConnection:
+          Authentication:
+            GoogleIDToken:
+              Audience:
+                _text: __CUSTOM_AUDIENCE__
+          Properties:
+            Property:
+              - _attributes:
+                  name: keepalive.timeout.millis
+                _text: "60000"
+              - _attributes:
+                  name: success.codes
+                _text: 2xx,4xx
+          URL:
+            _text: __CLOUD_RUN_URL__/v1/ldap/authenticate
+
+  # 2B. ServiceCallout: Query LDAP Policy Operation
+  - name: SC-LDAP-Policy-Query
+    type: ServiceCallout
+    content:
+      ServiceCallout:
+        _attributes:
+          async: "false"
+          continueOnError: "true"
+          enabled: "true"
+          name: SC-LDAP-Policy-Query
+        DisplayName:
+          _text: SC-LDAP-Policy-Query
+        Request:
+          _attributes:
+            clearPayload: "true"
+            variable: ldap.callout.request
+          IgnoreUnresolvedVariables:
+            _text: "true"
+          Set:
+            Headers:
+              Header:
+                _attributes:
+                  name: Content-Type
+                _text: application/json
+            Payload:
+              _attributes:
+                contentType: application/json
+              _text: |
+                {
+                  "provider_id": "{request.header.x-ldap-provider}",
+                  "scope": "SUB",
+                  "filter_variables": {
+                    "username": "{request.queryparam.username}"
+                  },
+                  "protect_ldap_injection": true,
+                  "attributes": ["mail", "cn", "displayName", "department", "telephoneNumber", "memberOf"],
+                  "multivalue_mode": "JOIN_COMMA"
+                }
+            Verb:
+              _text: POST
+        Response:
+          _text: ldap.callout.response
+        Timeout:
+          _text: "8000"
+        HTTPTargetConnection:
+          Authentication:
+            GoogleIDToken:
+              Audience:
+                _text: __CUSTOM_AUDIENCE__
+          Properties:
+            Property:
+              - _attributes:
+                  name: keepalive.timeout.millis
+                _text: "60000"
+              - _attributes:
+                  name: success.codes
+                _text: 2xx,4xx
+          URL:
+            _text: __CLOUD_RUN_URL__/v1/ldap/query
+
+  # 2C. ServiceCallout: Write LDAP Policy Operation (LDIF + Write Base DN)
+  - name: SC-LDAP-Policy-Write
+    type: ServiceCallout
+    content:
+      ServiceCallout:
+        _attributes:
+          async: "false"
+          continueOnError: "true"
+          enabled: "true"
+          name: SC-LDAP-Policy-Write
+        DisplayName:
+          _text: SC-LDAP-Policy-Write
+        Request:
+          _attributes:
+            clearPayload: "true"
+            variable: ldap.callout.request
+          IgnoreUnresolvedVariables:
+            _text: "true"
+          Set:
+            Headers:
+              Header:
+                _attributes:
+                  name: Content-Type
+                _text: application/json
+            Payload:
+              _attributes:
+                contentType: application/json
+              _text: |
+                {
+                  "provider_id": "{request.header.x-ldap-provider}",
+                  "ldif_template": "dn: cn=$[cn],ou=$[ou],dc=enterprise,dc=com\nchangetype: modify\nreplace: telephoneNumber\ntelephoneNumber: $[phone]\n-",
+                  "variables": {
+                    "cn": "{request.queryparam.cn}",
+                    "ou": "{request.queryparam.ou}",
+                    "phone": "{request.header.x-new-phone}"
+                  },
+                  "protect_ldap_injection": true
+                }
+            Verb:
+              _text: POST
+        Response:
+          _text: ldap.callout.response
+        Timeout:
+          _text: "8000"
+        HTTPTargetConnection:
+          Authentication:
+            GoogleIDToken:
+              Audience:
+                _text: __CUSTOM_AUDIENCE__
+          Properties:
+            Property:
+              - _attributes:
+                  name: keepalive.timeout.millis
+                _text: "60000"
+              - _attributes:
+                  name: success.codes
+                _text: 2xx,4xx
+          URL:
+            _text: __CLOUD_RUN_URL__/v1/ldap/write
+
+  # 3. ExtractVariables: Maps Cloud Run JSON Output into Apigee Flow Variables (ldap.*)
+  - name: EV-LDAP-Context-Variables
+    type: ExtractVariables
+    content:
+      ExtractVariables:
+        _attributes:
+          async: "false"
+          continueOnError: "false"
+          enabled: "true"
+          name: EV-LDAP-Context-Variables
+        DisplayName:
+          _text: EV-LDAP-Context-Variables
+        Source:
+          _attributes:
+            clearPayload: "false"
+          _text: ldap.callout.response
+        VariablePrefix:
+          _text: ldap
+        IgnoreUnresolvedVariables:
+          _text: "true"
+        JSONPayload:
+          Variable:
+            - _attributes:
+                name: provider_id
+                type: string
+              JSONPath:
+                _text: $.provider_id
+            - _attributes:
+                name: success
+                type: boolean
+              JSONPath:
+                _text: $.success
+            - _attributes:
+                name: authenticated
+                type: boolean
+              JSONPath:
+                _text: $.authenticated
+            - _attributes:
+                name: authorized
+                type: boolean
+              JSONPath:
+                _text: $.authorized
+            - _attributes:
+                name: dn
+                type: string
+              JSONPath:
+                _text: $.dn
+            - _attributes:
+                name: mail
+                type: string
+              JSONPath:
+                _text: $.variables.mail
+            - _attributes:
+                name: cn
+                type: string
+              JSONPath:
+                _text: $.variables.cn
+            - _attributes:
+                name: displayName
+                type: string
+              JSONPath:
+                _text: $.variables.displayName
+            - _attributes:
+                name: department
+                type: string
+              JSONPath:
+                _text: $.variables.department
+            - _attributes:
+                name: telephoneNumber
+                type: string
+              JSONPath:
+                _text: $.variables.telephoneNumber
+            - _attributes:
+                name: memberOf
+                type: string
+              JSONPath:
+                _text: $.variables.memberOf
+            - _attributes:
+                name: error.msg
+                type: string
+              JSONPath:
+                _text: $.error.msg
+            - _attributes:
+                name: error.code
+                type: integer
+              JSONPath:
+                _text: $.error.code
+            - _attributes:
+                name: error.result_name
+                type: string
+              JSONPath:
+                _text: $.error.result_name
+
+  # 4. RaiseFault: Rejects Request When LDAP Policy Fails
+  - name: RF-LDAP-Policy-Failed
+    type: RaiseFault
+    content:
+      RaiseFault:
+        _attributes:
+          async: "false"
+          continueOnError: "false"
+          enabled: "true"
+          name: RF-LDAP-Policy-Failed
+        DisplayName:
+          _text: RF-LDAP-Policy-Failed
+        FaultResponse:
+          Set:
+            Headers:
+              Header:
+                _attributes:
+                  name: Content-Type
+                _text: application/json
+            Payload:
+              _attributes:
+                contentType: application/json
+              _text: |
+                {
+                  "error": "ldap_policy_rejection",
+                  "provider_id": "{ldap.provider_id}",
+                  "ldap_error_code": "{ldap.error.code}",
+                  "ldap_error_name": "{ldap.error.result_name}",
+                  "message": "{ldap.error.msg}"
+                }
+            StatusCode:
+              _text: "{ldap.callout.response.status.code}"
+        IgnoreUnresolvedVariables:
+          _text: "true"
+
+  # 5. AssignMessage: Enriches Upstream Request Headers with Resolved LDAP Attributes
+  - name: AM-Inject-LDAP-Headers
+    type: AssignMessage
+    content:
+      AssignMessage:
+        _attributes:
+          async: "false"
+          continueOnError: "false"
+          enabled: "true"
+          name: AM-Inject-LDAP-Headers
+        DisplayName:
+          _text: AM-Inject-LDAP-Headers
+        Set:
+          Headers:
+            Header:
+              - _attributes:
+                  name: X-LDAP-DN
+                _text: "{ldap.dn}"
+              - _attributes:
+                  name: X-LDAP-Mail
+                _text: "{ldap.mail}"
+              - _attributes:
+                  name: X-LDAP-Department
+                _text: "{ldap.department}"
+              - _attributes:
+                  name: X-LDAP-Groups
+                _text: "{ldap.memberOf}"
+        IgnoreUnresolvedVariables:
+          _text: "true"
+
+  # 6. AssignMessage (Response PostFlow): Returns Emulated LDAP Policy Context Variables
+  - name: AM-Build-Response
+    type: AssignMessage
+    content:
+      AssignMessage:
+        _attributes:
+          async: "false"
+          continueOnError: "false"
+          enabled: "true"
+          name: AM-Build-Response
+        DisplayName:
+          _text: AM-Build-Response
+        Set:
+          Headers:
+            Header:
+              _attributes:
+                name: Content-Type
+              _text: application/json
+          Payload:
+            _attributes:
+              contentType: application/json
+            _text: |
+              {
+                "apigee_policy": "SC-LDAP-Policy-Callout",
+                "provider_id": "{ldap.provider_id}",
+                "authenticated": "{ldap.authenticated}",
+                "authorized": "{ldap.authorized}",
+                "success": "{ldap.success}",
+                "dn": "{ldap.dn}",
+                "extracted_context_variables": {
+                  "ldap.cn": "{ldap.cn}",
+                  "ldap.displayName": "{ldap.displayName}",
+                  "ldap.mail": "{ldap.mail}",
+                  "ldap.department": "{ldap.department}",
+                  "ldap.telephoneNumber": "{ldap.telephoneNumber}",
+                  "ldap.memberOf": "{ldap.memberOf}"
+                },
+                "injected_backend_headers": {
+                  "X-LDAP-DN": "{request.header.X-LDAP-DN.values.string}",
+                  "X-LDAP-Mail": "{request.header.X-LDAP-Mail}",
+                  "X-LDAP-Department": "{request.header.X-LDAP-Department}",
+                  "X-LDAP-Groups": "{request.header.X-LDAP-Groups.values.string}"
+                }
+              }
+          StatusCode:
+            _text: "200"
+        IgnoreUnresolvedVariables:
+          _text: "true"

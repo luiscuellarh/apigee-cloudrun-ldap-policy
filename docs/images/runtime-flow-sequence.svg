@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 450" font-family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif">
+  <rect width="980" height="450" rx="12" fill="#0f172a"/>
+  <text x="490" y="34" fill="#f8fafc" font-size="16" font-weight="700" text-anchor="middle">2. Runtime LDAP Policy Call Sequence (ldap-policy-callout-v1 — ServiceCallout, Zero KVM)</text>
+
+  <!-- Lifelines -->
+  <g fill="#1e293b" stroke="#a855f7" stroke-width="1.5">
+    <rect x="30" y="55" width="110" height="40" rx="6"/>
+    <rect x="190" y="55" width="190" height="40" rx="6"/>
+    <rect x="430" y="55" width="180" height="40" rx="6"/>
+    <rect x="660" y="55" width="130" height="40" rx="6"/>
+    <rect x="830" y="55" width="120" height="40" rx="6"/>
+  </g>
+  <g fill="#f8fafc" font-size="12" font-weight="700" text-anchor="middle">
+    <text x="85" y="80">Client</text>
+    <text x="285" y="80">Apigee: ldap-policy-callout-v1</text>
+    <text x="520" y="80">Cloud Run (ServiceCallout)</text>
+    <text x="725" y="80">LDAP Server</text>
+    <text x="890" y="80">Backend Target</text>
+  </g>
+  <g stroke="#475569" stroke-width="1.5" stroke-dasharray="5,5">
+    <line x1="85" y1="95" x2="85" y2="425"/>
+    <line x1="285" y1="95" x2="285" y2="425"/>
+    <line x1="520" y1="95" x2="520" y2="425"/>
+    <line x1="725" y1="95" x2="725" y2="425"/>
+    <line x1="890" y1="95" x2="890" y2="425"/>
+  </g>
+
+  <!-- Messages -->
+  <g font-size="11" fill="#e2e8f0">
+    <line x1="85" y1="130" x2="285" y2="130" stroke="#a855f7" stroke-width="2"/>
+    <text x="185" y="122" text-anchor="middle">1. GET /orders (Header: x-ldap-provider, Basic Auth)</text>
+
+    <line x1="285" y1="175" x2="520" y2="175" stroke="#34d399" stroke-width="2"/>
+    <text x="402" y="167" text-anchor="middle">2. ServiceCallout POST /v1/ldap/authenticate (provider_id + GoogleIDToken)</text>
+
+    <line x1="520" y1="220" x2="725" y2="220" stroke="#f43f5e" stroke-width="2"/>
+    <text x="622" y="212" text-anchor="middle">3. Search User DN + Bind + Verify Group on Warm Pool</text>
+
+    <line x1="725" y1="260" x2="520" y2="260" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4,4"/>
+    <text x="622" y="252" text-anchor="middle">4. Return Attributes (dn, cn, mail, memberOf)</text>
+
+    <line x1="520" y1="300" x2="285" y2="300" stroke="#34d399" stroke-width="1.5" stroke-dasharray="4,4"/>
+    <text x="402" y="292" text-anchor="middle">5. 200 OK JSON (authenticated, authorized, variables)</text>
+
+    <line x1="285" y1="345" x2="890" y2="345" stroke="#60a5fa" stroke-width="2"/>
+    <text x="587" y="337" text-anchor="middle">6. ExtractVariables (ldap.*) + Forward GET /orders with X-LDAP-* Headers</text>
+
+    <line x1="890" y1="380" x2="285" y2="380" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4,4"/>
+    <text x="587" y="372" text-anchor="middle">7. 200 OK Business Response</text>
+
+    <line x1="285" y1="410" x2="85" y2="410" stroke="#a855f7" stroke-width="1.5" stroke-dasharray="4,4"/>
+    <text x="185" y="402" text-anchor="middle">8. 200 OK</text>
+  </g>
+</svg>

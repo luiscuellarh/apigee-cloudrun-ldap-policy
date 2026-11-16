@@ -1,0 +1,125 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/apigee/apigee-templater/main/schema/gateway.schema.1.0.json
+name: __ADMIN_PROXY_NAME__
+displayName: __ADMIN_PROXY_NAME__
+type: proxy
+gateway: apigee
+schemaVersion: 1.0.0
+description: LDAP Admin Proxy persisting provider configs in Apigee KVM (__KVM_NAME__) and routing to Cloud Run as TargetEndpoint.
+
+endpoints:
+  - name: default
+    basePath: __ADMIN_BASE_PATH__
+    routes:
+      - name: default
+        target: default
+    flows:
+      # When Admin registers/updates a provider (POST /v1/ldap-admin/providers):
+      # 1. Extract $.id from JSON body
+      # 2. Persist in Apigee Encrypted KVM (__KVM_NAME__)
+      # 3. Route to Cloud Run TargetEndpoint (POST /v1/ldap/providers) to validate & warm LDAPPool
+      - name: Register-LDAP-Provider
+        mode: Request
+        condition: (proxy.pathsuffix MatchesPath "/providers") and ((request.verb = "POST") or (request.verb = "PUT"))
+        steps:
+          - name: EV-Extract-Provider-ID
+          - name: KVM-Put-Provider
+
+      # Read stored provider config from Apigee KVM when ?id=<provider_id> is queried
+      - name: Get-LDAP-Provider-KVM
+        mode: Request
+        condition: (proxy.pathsuffix MatchesPath "/providers") and (request.verb = "GET") and (request.queryparam.id != null)
+        steps:
+          - name: KVM-Get-Provider
+
+targets:
+  - name: default
+    url: __CLOUD_RUN_URL__/v1/ldap
+    httpTargetConnection:
+      Properties:
+        Property:
+          - metadata:
+              name: success.codes
+            _text: 1xx,2xx,3xx,4xx
+      Authentication:
+        GoogleIDToken:
+          Audience: __CUSTOM_AUDIENCE__
+      URL: __CLOUD_RUN_URL__/v1/ldap
+    flows: []
+
+policies:
+  # 1. Extract provider_id ($.id) for KVM persistence
+  - name: EV-Extract-Provider-ID
+    type: ExtractVariables
+    content:
+      ExtractVariables:
+        _attributes:
+          async: "false"
+          continueOnError: "false"
+          enabled: "true"
+          name: EV-Extract-Provider-ID
+        DisplayName:
+          _text: EV-Extract-Provider-ID
+        Source:
+          _attributes:
+            clearPayload: "false"
+          _text: request
+        IgnoreUnresolvedVariables:
+          _text: "true"
+        JSONPayload:
+          Variable:
+            - _attributes:
+                name: admin.provider_id
+                type: string
+              JSONPath:
+                _text: $.id
+
+  # 2. Persist Provider JSON in Apigee KVM (__KVM_NAME__)
+  - name: KVM-Put-Provider
+    type: KeyValueMapOperations
+    content:
+      KeyValueMapOperations:
+        _attributes:
+          async: "false"
+          continueOnError: "false"
+          enabled: "true"
+          name: KVM-Put-Provider
+          mapIdentifier: __KVM_NAME__
+        DisplayName:
+          _text: KVM-Put-Provider
+        Scope:
+          _text: environment
+        Put:
+          _attributes:
+            override: "true"
+          Key:
+            Parameter:
+              _attributes:
+                ref: admin.provider_id
+          Value:
+            _attributes:
+              ref: request.content
+
+  # 3. Read Provider JSON from Apigee KVM (__KVM_NAME__) when ?id= is queried
+  - name: KVM-Get-Provider
+    type: KeyValueMapOperations
+    content:
+      KeyValueMapOperations:
+        _attributes:
+          async: "false"
+          continueOnError: "true"
+          enabled: "true"
+          name: KVM-Get-Provider
+          mapIdentifier: __KVM_NAME__
+        DisplayName:
+          _text: KVM-Get-Provider
+        Scope:
+          _text: environment
+        ExpiryTimeInSecs:
+          _text: "300"
+        Get:
+          _attributes:
+            assignTo: private.admin.kvm_provider_json
+          Key:
+            Parameter:
+              _attributes:
+                ref: request.queryparam.id

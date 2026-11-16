@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 420" font-family="Inter, -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif">
+  <rect width="980" height="420" rx="12" fill="#0f172a"/>
+  <text x="490" y="34" fill="#f8fafc" font-size="16" font-weight="700" text-anchor="middle">1. LDAP Admin Call Sequence (ldap-admin-v1 Proxy — Cloud Run as TargetEndpoint)</text>
+
+  <!-- Lifelines -->
+  <g fill="#1e293b" stroke="#38bdf8" stroke-width="1.5">
+    <rect x="40" y="55" width="120" height="40" rx="6"/>
+    <rect x="220" y="55" width="160" height="40" rx="6"/>
+    <rect x="430" y="55" width="150" height="40" rx="6"/>
+    <rect x="630" y="55" width="160" height="40" rx="6"/>
+    <rect x="830" y="55" width="120" height="40" rx="6"/>
+  </g>
+  <g fill="#f8fafc" font-size="12" font-weight="700" text-anchor="middle">
+    <text x="100" y="80">Admin</text>
+    <text x="300" y="80">Apigee: ldap-admin-v1</text>
+    <text x="505" y="80">Apigee KVM</text>
+    <text x="710" y="80">Cloud Run (Target)</text>
+    <text x="890" y="80">LDAP Server</text>
+  </g>
+  <g stroke="#475569" stroke-width="1.5" stroke-dasharray="5,5">
+    <line x1="100" y1="95" x2="100" y2="395"/>
+    <line x1="300" y1="95" x2="300" y2="395"/>
+    <line x1="505" y1="95" x2="505" y2="395"/>
+    <line x1="710" y1="95" x2="710" y2="395"/>
+    <line x1="890" y1="95" x2="890" y2="395"/>
+  </g>
+
+  <!-- Messages -->
+  <g font-size="11" fill="#e2e8f0">
+    <line x1="100" y1="130" x2="300" y2="130" stroke="#38bdf8" stroke-width="2"/>
+    <text x="200" y="122" text-anchor="middle">1. POST /v1/ldap-admin/providers (Provider JSON)</text>
+
+    <line x1="300" y1="170" x2="505" y2="170" stroke="#f59e0b" stroke-width="2"/>
+    <text x="402" y="162" text-anchor="middle">2. KVM Put (Key: id, Value: Provider JSON)</text>
+
+    <line x1="300" y1="215" x2="710" y2="215" stroke="#34d399" stroke-width="2"/>
+    <text x="505" y="207" text-anchor="middle">3. TargetEndpoint POST /v1/ldap/providers (GoogleIDToken: ldap-policy-service)</text>
+
+    <line x1="710" y1="260" x2="890" y2="260" stroke="#f43f5e" stroke-width="2"/>
+    <text x="800" y="252" text-anchor="middle">4. Test Bind (Bind DN &amp; Password)</text>
+
+    <line x1="890" y1="295" x2="710" y2="295" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4,4"/>
+    <text x="800" y="288" text-anchor="middle">5. Bind Success (Result Code 0)</text>
+
+    <line x1="710" y1="335" x2="300" y2="335" stroke="#34d399" stroke-width="1.5" stroke-dasharray="4,4"/>
+    <text x="505" y="327" text-anchor="middle">6. 200 OK (Registered in Memory &amp; Pool Warmed)</text>
+
+    <line x1="300" y1="370" x2="100" y2="370" stroke="#38bdf8" stroke-width="1.5" stroke-dasharray="4,4"/>
+    <text x="200" y="362" text-anchor="middle">7. 200 OK</text>
+  </g>
+</svg>
